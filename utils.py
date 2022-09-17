@@ -273,7 +273,8 @@ def conv_im_w_box(img, img_box, verbose=0):
 
     if len(img_box.shape)==3:
         filter_count = 3
-    conv = torch.nn.Conv2d(in_channels=filter_count, out_channels=1, kernel_size=kern_sz, stride=1, padding=(int(kern_sz[0]/2), int(kern_sz[1]/2)))
+    #conv = torch.nn.Conv2d(in_channels=filter_count, out_channels=1, kernel_size=kern_sz, stride=1, padding=(int(kern_sz[0]/2), int(kern_sz[1]/2)))
+    conv = torch.nn.Conv2d(in_channels=filter_count, out_channels=1, kernel_size=kern_sz, stride=1, padding=0)
 
     if verbose > 1:
         print(f"device = {device}")
@@ -283,20 +284,19 @@ def conv_im_w_box(img, img_box, verbose=0):
         print(f"conv.weight.shape = {conv.weight.shape}")
         print(f"filter_count = {filter_count}")
 
-    if filter_count > 1:
-        for i in range(filter_count):
-            conv.weight[0, i, :, :] = torch.from_numpy(img_box[:, :, i])
-    else:
-        conv.weight[0, 0, :, :] = torch.from_numpy(img_box)
-    conv.to(device)
-
     img = torch.tensor(img)
+    img_box = torch.tensor(img_box)
     if filter_count==3:
         img = img.permute(2, 0, 1).unsqueeze(0)
+        img_box.permute(2, 0, 1)
+        for i in range(filter_count):
+            conv.weight[0, i, :, :] = img_box[:, :, i]
     else:
         img = img.unsqueeze(0).unsqueeze(0)
-    img = img.float().to(device)
+        conv.weight[0, 0, :, :] = img_box
 
+    conv.to(device)
+    img = img.float().to(device)
     if verbose > 1:
         print(f"tensor img = {img.shape}")
     y1 = conv(img)
@@ -304,12 +304,49 @@ def conv_im_w_box(img, img_box, verbose=0):
         print(f"y1 = {y1.shape}")
     y1 = y1.view(y1.shape[2], y1.shape[3], y1.shape[1])
     if verbose > 1:
-        print(f"y1 = {y1.shape}")
+        print(f"y1c = {y1.shape}")
     res_find = y1.cpu().detach().numpy().squeeze()
     return res_find
 
+def crop_and_save(img_path, rect_crop):
+    img = mpimg.imread(img_path)
+    img_box = crop_rect_from_img(img, rect_crop)
+    fname = img_path.replace(".jpg", "") + f'_cropped_x{rect_crop.xy[0]}_y{rect_crop.xy[1]}_w{rect_crop.get_width()}_h{rect_crop.get_height()}.jpg'
+    plt.imsave(fname, img_box)
+    return
+
+def crop_and_save_2(img, rect_crop):
+    img_box = crop_rect_from_img(img, rect_crop)
+    plt.imsave("im_base.jpg", img)
+    fname = f'im_base_cropped_x{rect_crop.xy[0]}_y{rect_crop.xy[1]}_w{rect_crop.get_width()}_h{rect_crop.get_height()}.jpg'
+    plt.imsave(fname, img_box)
+    return
+
+def locate_crop(img, crop):
+    if len(img.shape)==3:
+        img, crop = torch.as_tensor(img, dtype=torch.float32), torch.as_tensor(crop, dtype=torch.float32)
+        img, crop = img.permute(2, 1, 0).unsqueeze(0), crop.permute(2, 1, 0).unsqueeze(0)
+    else:
+        img, crop = torch.as_tensor(img, dtype=torch.float32), torch.as_tensor(crop, dtype=torch.float32)
+        img, crop = img.unsqueeze(0).unsqueeze(0), crop.unsqueeze(0).unsqueeze(0)
+
+    img_sq, crop_sq = img * img, crop * crop
+    crop_norm = crop / torch.sqrt(crop_sq.sum())
+
+    sum_filter = torch.ones_like(crop_norm)
+
+    img_crop_activation = torch.nn.functional.conv2d(img, crop_norm, stride=1, padding=0)
+    img_sq_sum = torch.nn.functional.conv2d(img_sq, sum_filter, stride=1, padding=0)
+
+    cosine_distances = img_crop_activation / torch.sqrt(img_sq_sum)
+    cosine_distances = cosine_distances.numpy()[0, 0]
+
+    coordinate = np.unravel_index(cosine_distances.argmax(), cosine_distances.shape)
+    return coordinate
+
 def search_iminim_simulate(img_path, rect_crop, verbose=1):
     ret_dict = {"rect_crop": copy(rect_crop)}
+    crop_and_save(img_path, rect_crop)
     #  1. read the image
     img = mpimg.imread(img_path)
     ret_dict["img"] = img.copy()
@@ -317,6 +354,7 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
     img_box = crop_rect_from_img(img, rect_crop)
     ret_dict["img_box"] = img_box.copy()
     ## NOW THE IMAGE AND IMG BOX ARE READY##
+    # coordinate_1 = locate_crop(img, img_box)
 
     #  3. resize the image to max width allowed
     img, perc = resize_img(img.astype(np.float32), perc=None, max_w=1024)
@@ -324,15 +362,19 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
     ret_dict["rs_img"] = img.copy()
     ret_dict["rs_img_box"] = img_box.copy()
 
+    coordinate = locate_crop(img, img_box)
+
     #  4. get a -1/+1 copy of the original image and crop the part to search
-    img = 0.5-img.astype(np.float32)/np.max(img)
     new_xy = round(rect_crop.xy[0]*perc), round(rect_crop.xy[1]*perc)
     new_h, new_w = round(rect_crop.get_height()*perc), round(rect_crop.get_width()*perc)
     if verbose > 0:
         print(f"new_xy = {new_xy}, new_h({new_h}, new_w({new_w})")
     rect_crop.set(xy=new_xy, width=new_w, height=new_h)
     ret_dict["rect_crop_new"] = copy(rect_crop)
-    img_box = crop_rect_from_img(img, rect_crop)
+
+    # crop_and_save_2(img, ret_dict["rect_crop_new"])
+    img = img.astype(np.float32)
+    img_box = img_box.astype(np.float32)
     ret_dict["s_rs_img"] = img.copy()
     ret_dict["s_rs_img_box"] = img_box.copy()
 
@@ -345,18 +387,16 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
         print(f"modif_xy = {modif_xy}, new_h({new_h}, new_w({new_w})")
         print(f"rect_crop_modif = {ret_dict['rect_crop_modif']}")
 
-    res_find_1 = conv_im_w_box(img, img_box, verbose=verbose)
+    crop_norm = img_box / np.sqrt((img_box*img_box).sum())
     filt = np.ones(img_box.shape, dtype=np.float32)
+
+    res_find_1 = conv_im_w_box(img, crop_norm, verbose=verbose)
     res_find_2 = conv_im_w_box(img*img, filt, verbose=verbose)
 
     ret_dict["res_find_1"] = normalize_img_for_view(res_find_1, verbose=verbose)
     ret_dict["res_find_2"] = normalize_img_for_view(res_find_2, verbose=verbose)
 
-    res_find_1[res_find_1<0] = 0.0
-    res_find_2[res_find_2<0] = 0.0
-    res_find_1 = np.sqrt(res_find_1)
-    res_find_2 = np.sqrt(res_find_2)
-    res_find = res_find_1/res_find_2
+    res_find = res_find_1/np.sqrt(res_find_2)
     ret_dict["res_find_f"] = normalize_img_for_view(res_find, verbose=verbose)
 
     mn, mx = np.min(np.ravel(res_find)), np.max(np.ravel(res_find))
@@ -369,6 +409,7 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
     if verbose > 0:
         print(f"foundxy = {foundxy}")
         print(f"remapped_xy = {remapped_xy}")
+        print(f"coordinate = {coordinate}")
         print(f"given_xy = {ret_dict['rect_crop'].xy}")
 
     img_to_view = normalize_img_for_view(res_find, verbose=verbose)
@@ -389,5 +430,17 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
     # r = get_rectangle((block_corner["col_w"], block_corner["row_h"]), block_wh)
     # print(f"rect approximately at xcw({cw/perc}), yrh({rh/perc})")
     # return # r, img, img_box, res_find
+
+def locate_rotated_crop(img_path, rect_crop, rotate_deg, verbose=1):
+    ret_dict = {"rect_crop": copy(rect_crop)}
+    crop_and_save(img_path, rect_crop)
+    #  1. read the image
+    img = mpimg.imread(img_path)
+    ret_dict["img"] = img.copy()
+    #  2. crop the rectangle from the image
+    img_box = crop_rect_from_img(img, rect_crop)
+    ret_dict["img_box"] = img_box.copy()
+
+    return
 
 
