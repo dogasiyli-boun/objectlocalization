@@ -178,10 +178,11 @@ def search_iminim(img, img_box):
     return r, img, img_box, res_find
 
 
-def display_iminim_results(ret_dict, step, title_str=""):
+
+def display_iminim_results(ret_dict, step, title_str="", imgname=""):
     plt.clf()
     if step == 0:
-        fig, ax = plt.subplots(1, 2,  figsize=(20, 10))
+        fig, ax = plt.subplots(1, 2,  figsize=(20, 10), gridspec_kw={'width_ratios': [3, 1]})
         ax[0].imshow(ret_dict["img"])
         new_r = copy(ret_dict["rect_crop"])
         new_r.set(edgecolor="r")
@@ -190,28 +191,31 @@ def display_iminim_results(ret_dict, step, title_str=""):
         ax[0].set_title(f"image input with size {ret_dict['img'].shape}")
         ax[1].set_title(f"r({new_r})\nbox size {ret_dict['img_box'].shape}")
         fig.suptitle(title_str)
+        plt.savefig("step0"+imgname+".jpeg")
         plt.show()
     if step == 1:
-        fig, ax = plt.subplots(1, 2,  figsize=(20, 10))
+        fig, ax = plt.subplots(1, 2,  figsize=(20, 10), gridspec_kw={'width_ratios': [3, 1]})
         ax[0].imshow(ret_dict["rs_img"], cmap="gray")
-        new_r = copy(ret_dict["rect_crop"])
+        new_r = copy(ret_dict["rect_crop_new"])
         new_r.set(edgecolor="white")
         ax[0].add_patch(new_r)
         ax[1].imshow(ret_dict["rs_img_box"], cmap="gray")
         ax[0].set_title(f"image input resized {ret_dict['rs_img'].shape}")
         ax[1].set_title(f"r({new_r})\nbox resized {ret_dict['rs_img_box'].shape}")
         fig.suptitle(title_str)
+        plt.savefig("step1" + imgname + ".jpeg")
         plt.show()
     if step == 2:
-        fig, ax = plt.subplots(1, 2,  figsize=(20, 10))
+        fig, ax = plt.subplots(1, 2,  figsize=(20, 10), gridspec_kw={'width_ratios': [3, 1]})
         ax[0].imshow(ret_dict["s_rs_img"], cmap="gray")
         new_r = copy(ret_dict["rect_crop_new"])
-        new_r.set(edgecolor="black")
+        new_r.set(edgecolor="orange")
         ax[0].add_patch(new_r)
         ax[1].imshow(ret_dict["s_rs_img_box"], cmap="gray")
         ax[0].set_title(f"image -+ wSize {ret_dict['s_rs_img'].shape}")
         ax[1].set_title(f"r({new_r})\nbox -+ wSize {ret_dict['s_rs_img_box'].shape}")
         fig.suptitle(title_str)
+        plt.savefig("step2" + imgname + ".jpeg")
         plt.show()
     if step == 3:
         plt.figure(figsize=(20, 10))
@@ -220,43 +224,64 @@ def display_iminim_results(ret_dict, step, title_str=""):
         new_r.set(edgecolor="black")
         plt.gca().add_patch(new_r)
         plt.title(f"image wSize {ret_dict['result_img'].shape}")
+        plt.savefig("step3" + imgname + ".jpeg")
+        plt.show()
+    if step == 4:
+        fig, ax = plt.subplots(3, 1, figsize=(10, 10))
+        ax[0].imshow(ret_dict["res_find_1"], cmap="gray")
+        ax[1].imshow(ret_dict["res_find_2"], cmap="gray")
+        ax[2].imshow(ret_dict["res_find_f"], cmap="gray")
+        ax[0].set_title("a=im_conv")
+        ax[1].set_title("b=ones_conv")
+        ax[2].set_title("a / b")
+        for i in range(3):
+            new_r = copy(ret_dict["rect_crop_modif"])
+            new_r.set(edgecolor="red")
+            ax[i].add_patch(new_r)
+        fig.suptitle(title_str)
+        plt.savefig("step4" + imgname + ".jpeg")
         plt.show()
     return
 
-def normalize_img_for_view(X):
+def normalize_img_for_view(X, verbose=0):
     X = X.astype(np.float32)
     mn, mx = np.min(np.ravel(X)), np.max(np.ravel(X))
-    print(f"1.min({mn}), max({mx})")
+    if verbose > 1:
+        print(f"1.min({mn}), max({mx})")
     X = X - mn
     mn, mx = np.min(np.ravel(X)), np.max(np.ravel(X))
-    print(f"2.min({mn}), max({mx})")
+    if verbose > 1:
+        print(f"2.min({mn}), max({mx})")
     X = X/mx
     mn, mx = np.min(np.ravel(X)), np.max(np.ravel(X))
-    print(f"3.min({mn}), max({mx})")
+    if verbose > 1:
+        print(f"3.min({mn}), max({mx})")
     X = X*255
     mn, mx = np.min(np.ravel(X)), np.max(np.ravel(X))
-    print(f"4.min({mn}), max({mx})")
+    if verbose > 1:
+        print(f"4.min({mn}), max({mx})")
     X = X.astype(np.uint8)
     mn, mx = np.min(np.ravel(X)), np.max(np.ravel(X))
-    print(f"5.min({mn}), max({mx})")
+    if verbose > 1:
+        print(f"5.min({mn}), max({mx})")
     return X
 
-def conv_im_w_box(img, img_box):
+def conv_im_w_box(img, img_box, verbose=0):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     filter_count = 1
     kern_sz = np.shape(img_box)[0:2]
 
     if len(img_box.shape)==3:
         filter_count = 3
+    conv = torch.nn.Conv2d(in_channels=filter_count, out_channels=1, kernel_size=kern_sz, stride=1, padding=(int(kern_sz[0]/2), int(kern_sz[1]/2)))
 
-    conv = torch.nn.Conv2d(in_channels=filter_count, out_channels=1, kernel_size=kern_sz, stride=1, padding=0)
-
-    print(f"device = {device}")
-    print(f"img = {img.shape}")
-    print(f"img_box = {img_box.shape}")
-    print(f"kern_sz = {kern_sz}")
-    print(f"conv.weight.shape = {conv.weight.shape}")
-    print(f"filter_count = {filter_count}")
+    if verbose > 1:
+        print(f"device = {device}")
+        print(f"img = {img.shape}")
+        print(f"img_box = {img_box.shape}")
+        print(f"kern_sz = {kern_sz}")
+        print(f"conv.weight.shape = {conv.weight.shape}")
+        print(f"filter_count = {filter_count}")
 
     if filter_count > 1:
         for i in range(filter_count):
@@ -272,15 +297,18 @@ def conv_im_w_box(img, img_box):
         img = img.unsqueeze(0).unsqueeze(0)
     img = img.float().to(device)
 
-    print(f"tensor img = {img.shape}")
+    if verbose > 1:
+        print(f"tensor img = {img.shape}")
     y1 = conv(img)
-    print(f"y1 = {y1.shape}")
+    if verbose > 1:
+        print(f"y1 = {y1.shape}")
     y1 = y1.view(y1.shape[2], y1.shape[3], y1.shape[1])
-    print(f"y1 = {y1.shape}")
+    if verbose > 1:
+        print(f"y1 = {y1.shape}")
     res_find = y1.cpu().detach().numpy().squeeze()
     return res_find
 
-def search_iminim_simulate(img_path, rect_crop):
+def search_iminim_simulate(img_path, rect_crop, verbose=1):
     ret_dict = {"rect_crop": copy(rect_crop)}
     #  1. read the image
     img = mpimg.imread(img_path)
@@ -299,31 +327,55 @@ def search_iminim_simulate(img_path, rect_crop):
     #  4. get a -1/+1 copy of the original image and crop the part to search
     img = 0.5-img.astype(np.float32)/np.max(img)
     new_xy = round(rect_crop.xy[0]*perc), round(rect_crop.xy[1]*perc)
-    print(f"new_xy = {new_xy}")
-    rect_crop.set(xy=new_xy)
-    ret_dict = {"rect_crop_new": copy(rect_crop)}
+    new_h, new_w = round(rect_crop.get_height()*perc), round(rect_crop.get_width()*perc)
+    if verbose > 0:
+        print(f"new_xy = {new_xy}, new_h({new_h}, new_w({new_w})")
+    rect_crop.set(xy=new_xy, width=new_w, height=new_h)
+    ret_dict["rect_crop_new"] = copy(rect_crop)
     img_box = crop_rect_from_img(img, rect_crop)
     ret_dict["s_rs_img"] = img.copy()
     ret_dict["s_rs_img_box"] = img_box.copy()
 
-    res_find_1 = conv_im_w_box(img, img_box)
-    res_find_2 = conv_im_w_box(1-img, 1-img_box)
-    res_find = res_find_1 + res_find_2
+    modif_xy = round(rect_crop.xy[0]), round(rect_crop.xy[1])
+    ret_dict["rect_crop_modif"] = copy(ret_dict["rect_crop_new"])
+    ret_dict["rect_crop_modif"].set(xy=(int(modif_xy[0]), int(modif_xy[1])), width=new_w, height=new_h)
+    if verbose > 0:
+        print(f"rect_crop = {ret_dict['rect_crop']}")
+        print(f"rect_crop_new = {ret_dict['rect_crop_new']}")
+        print(f"modif_xy = {modif_xy}, new_h({new_h}, new_w({new_w})")
+        print(f"rect_crop_modif = {ret_dict['rect_crop_modif']}")
 
-    print(f"res_find_shape = {res_find.shape}")
+    res_find_1 = conv_im_w_box(img, img_box, verbose=verbose)
+    filt = np.ones(img_box.shape, dtype=np.float32)
+    res_find_2 = conv_im_w_box(img*img, filt, verbose=verbose)
+
+    ret_dict["res_find_1"] = normalize_img_for_view(res_find_1, verbose=verbose)
+    ret_dict["res_find_2"] = normalize_img_for_view(res_find_2, verbose=verbose)
+
+    res_find_1[res_find_1<0] = 0.0
+    res_find_2[res_find_2<0] = 0.0
+    res_find_1 = np.sqrt(res_find_1)
+    res_find_2 = np.sqrt(res_find_2)
+    res_find = res_find_1/res_find_2
+    ret_dict["res_find_f"] = normalize_img_for_view(res_find, verbose=verbose)
+
+    mn, mx = np.min(np.ravel(res_find)), np.max(np.ravel(res_find))
+    if verbose > 0:
+        print(f"result min({mn}), max({mx})")
+        print(f"res_find_shape = {res_find.shape}")
     rh, cw = np.unravel_index(res_find.argmax(), res_find.shape)
     foundxy = cw, rh
     remapped_xy = int(round(cw/perc)), int(round(rh/perc))
-    print(f"foundxy = {foundxy}")
-    print(f"remapped_xy = {remapped_xy}")
+    if verbose > 0:
+        print(f"foundxy = {foundxy}")
+        print(f"remapped_xy = {remapped_xy}")
+        print(f"given_xy = {ret_dict['rect_crop'].xy}")
 
-    img_to_view = normalize_img_for_view(res_find)
-    block_size = 4
+    img_to_view = normalize_img_for_view(res_find, verbose=verbose)
+    block_size = 20
     found_rect = get_rectangle(block_corner=(cw-block_size/2, rh-block_size/2), block_wh={"w": block_size, "h": block_size})
     ret_dict["result_img"] = img_to_view.copy()
     ret_dict["result_rect"] = copy(found_rect)
-
-
 
     return ret_dict, res_find
 
@@ -336,6 +388,6 @@ def search_iminim_simulate(img_path, rect_crop):
     # block_wh = {"w": img_box.shape[1], "h": img_box.shape[0]}
     # r = get_rectangle((block_corner["col_w"], block_corner["row_h"]), block_wh)
     # print(f"rect approximately at xcw({cw/perc}), yrh({rh/perc})")
-    return # r, img, img_box, res_find
+    # return # r, img, img_box, res_find
 
 
