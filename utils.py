@@ -57,7 +57,7 @@ def get_rotated_pixel_vals(im_w, im_h, rot_c, rot_deg):
     return rot_pixels, pix_vals_original, center_add
 
 def rotate_img(img, degree):
-    rotated_img = ndimage.rotate(img, degree*60)
+    rotated_img = ndimage.rotate(img, degree)
     return rotated_img
 
 def get_rectangle(block_corner, block_wh):
@@ -344,6 +344,29 @@ def locate_crop(img, crop):
     coordinate = np.unravel_index(cosine_distances.argmax(), cosine_distances.shape)
     return coordinate
 
+def locate_rotated_crop(img, crop):
+    if len(img.shape)==3:
+        img, crop = torch.as_tensor(img, dtype=torch.float32), torch.as_tensor(crop, dtype=torch.float32)
+        img, crop = img.permute(2, 1, 0).unsqueeze(0), crop.permute(2, 1, 0).unsqueeze(0)
+    else:
+        img, crop = torch.as_tensor(img, dtype=torch.float32), torch.as_tensor(crop, dtype=torch.float32)
+        img, crop = img.unsqueeze(0).unsqueeze(0), crop.unsqueeze(0).unsqueeze(0)
+
+    img_sq, crop_sq = img * img, crop * crop
+    crop_norm = crop / torch.sqrt(crop_sq.sum())
+
+    sum_filter = torch.ones_like(crop_norm)
+
+    img_crop_activation = torch.nn.functional.conv2d(img, crop_norm, stride=1, padding=0)
+    img_sq_sum = torch.nn.functional.conv2d(img_sq, sum_filter, stride=1, padding=0)
+
+    cosine_distances = img_crop_activation / torch.sqrt(img_sq_sum)
+    cosine_distances = cosine_distances.numpy()[0, 0]
+
+    coordinate = np.unravel_index(cosine_distances.argmax(), cosine_distances.shape)
+    return coordinate
+
+
 def search_iminim_simulate(img_path, rect_crop, verbose=1):
     ret_dict = {"rect_crop": copy(rect_crop)}
     crop_and_save(img_path, rect_crop)
@@ -431,6 +454,24 @@ def search_iminim_simulate(img_path, rect_crop, verbose=1):
     # print(f"rect approximately at xcw({cw/perc}), yrh({rh/perc})")
     # return # r, img, img_box, res_find
 
+def display_rotated_search(ret_dict, step, title_str="", imgname=""):
+    plt.clf()
+    if step == 0:
+        fig, ax = plt.subplots(1, 3,  figsize=(18, 9))
+        ax[0].imshow(ret_dict["img"])
+        new_r = copy(ret_dict["rect_crop"])
+        new_r.set(edgecolor="r")
+        ax[0].add_patch(new_r)
+        ax[1].imshow(ret_dict["img_box"])
+        ax[0].set_title(f"image input with size {ret_dict['img'].shape}")
+        ax[1].set_title(f"r({new_r})\nbox size {ret_dict['img_box'].shape}")
+        ax[2].imshow(ret_dict["img_rot"])
+        ax[2].set_title(f"image rotated input with size {ret_dict['img_rot'].shape}")
+        fig.suptitle(title_str)
+        plt.savefig("Rstep0"+imgname+".jpeg")
+        plt.show()
+    return
+
 def locate_rotated_crop(img_path, rect_crop, rotate_deg, verbose=1):
     ret_dict = {"rect_crop": copy(rect_crop)}
     crop_and_save(img_path, rect_crop)
@@ -440,7 +481,9 @@ def locate_rotated_crop(img_path, rect_crop, rotate_deg, verbose=1):
     #  2. crop the rectangle from the image
     img_box = crop_rect_from_img(img, rect_crop)
     ret_dict["img_box"] = img_box.copy()
+    img_rot = rotate_img(img, rotate_deg)
+    ret_dict["img_rot"] = img_rot.copy()
 
-    return
+    return ret_dict
 
 
