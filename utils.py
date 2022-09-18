@@ -487,3 +487,81 @@ def locate_rotated_crop(img_path, rect_crop, rotate_deg, verbose=1):
     return ret_dict
 
 
+class img_rotator():
+    def fit(self, image, assign_method='pick', nan_action='clip', rot_c=None, rot_deg=None):
+        '''
+        image  : the image that will be rotated
+        assign_method : after the source pixel values found as float indices
+                -'pick' : will basically pick rounded pixel indice
+                -'interpolate': will interpolate the 4 source pixels
+        nan_action: after rotation what will happen if the source pixel doesnt exist
+                 -'clip' clip it to 0/w/h
+                 -'remove' remove if any source value is out of reach
+                 -'available' use only the available pixels
+        '''
+        self.image = image.astype('float')
+        self.assign_method = assign_method
+        self.nan_action = nan_action
+        self.im_w, self.im_h = image.shape[0], image.shape[1]
+        self.rot_c = [int(self.im_w / 2), int(self.im_h / 2)] if rot_c is None else rot_c
+        self.rot_deg = 0 if rot_deg is None else rot_deg
+        self.im_channel = 1 if len(image.shape)<3 else image.shape[2]
+    def construct_weights(self, rot_c=None, rot_deg=None):
+        self.rot_c = self.rot_c if rot_c is None else rot_c
+        self.rot_deg = self.rot_deg if rot_deg is None else rot_deg
+        self.get_rotated_pixel_vals()
+    def get_pixels_of_image_given_center(w, h, c):
+        xs = np.tile(np.array([np.arange(w)]), (h,1))
+        ys = np.tile(np.array([np.arange(h)]), (w,1)).transpose()
+        pixel_pts = convert_points_3col(np.c_[ys.ravel(), xs.ravel()])
+        c.append(0)
+        center_add = c
+        return pixel_pts - c, center_add
+    @staticmethod
+    def _get_rotated_pixel_vals(im_w, im_h, rot_c, rot_deg):
+        rm = create_rot_matrix(rot_deg)
+        pix_vals_original, center_add = get_pixels_of_image_given_center(w=im_w, h=im_h, c=rot_c)
+        rot_pixels = rotate_pixels(pix_vals_original, rm)
+        return rot_pixels, pix_vals_original, center_add
+    def get_rotated_pixel_vals(self):
+        self.rot_pixels, self.pix_vals_original, self.center_add = img_rotator._get_rotated_pixel_vals(im_w=self.im_w, im_h=self.im_h, rot_c=self.rot_c, rot_deg=self.rot_deg)
+        return self.rot_pixels, self.pix_vals_original, self.center_add
+    def apply_rotation(self):
+        self.construct_weights()
+        xyz = np.asarray(self.center_add, dtype=float)+self.rot_pixels.astype(float)
+        x, y = xyz[:, 0], xyz[:, 1]
+        if self.assign_method == 'pick':
+            x, y = x.astype(int), y.astype(int)
+            if self.nan_action == 'clip':
+                x = np.clip(np.round(x, 0), 0, self.im_w-1).astype('int')
+                y = np.clip(np.round(y, 0), 0, self.im_h-1).astype('int')
+                imTargetIdx = np.ravel_multi_index([x, y], (self.im_w,self.im_h))
+                imSourceIdx = np.arange(0, len(imTargetIdx), dtype=int)
+            elif self.nan_action in ['remove', 'available']:
+                iSoTa = [[s, int(np.ravel_multi_index([[i], [j]], (self.im_w, self.im_h)))] for s, (i, j) in enumerate(zip(np.round(x,0), np.round(y,0))) if (i<self.im_w and i>=0 and j<self.im_h and j>=0)]
+                iSoTa = np.asarray(iSoTa)
+                imSourceIdx = iSoTa[:, 0]
+                imTargetIdx = iSoTa[:, 1]
+            self.imRot = np.zeros_like(self.image.ravel())
+            self.imRot[imTargetIdx] = self.image.ravel()[imSourceIdx]
+            self.imRot = self.imRot.reshape(self.image.shape)
+        elif self.assign_method=='interpolate':
+            if self.nan_action == 'clip':
+                xf, yf = np.floor(x).astype(int), np.floor(y).astype(int)
+                xw, yw = x - xf, y - yf
+                imRot = [self.image[np.clip(xf + i % 2, 0, self.im_w - 1).astype('int'), np.clip(yf + int(i / 2), 0, self.im_h - 1).astype(
+                    'int')] * ((1.0 - i % 2) + ((i % 2 - .5) * 2) * xw) * (
+                                   (1 - int(i / 2)) + ((int(i / 2) - .5) * 2) * yw) for i in range(4)]
+                self.imRot = sum(imRot).reshape(self.image.shape)
+            elif self.nan_action == 'remove':
+                xf, yf = np.floor(x).astype(int), np.floor(y).astype(int)
+                xw, yw = x - xf, y - yf
+                slct = ((xf >= 0).astype(int) * (xf<self.im_w-1).astype(int) * (yf >= 0).astype(int) * (yf<self.im_h-1).astype(int)).astype(bool)
+                imRot = [self.image[(xf + i % 2)[slct], (yf + int(i / 2))[slct]] * (
+                            (1.0 - i % 2) + ((i % 2 - .5) * 2) * xw[slct]) * (
+                                     (1 - int(i / 2)) + ((int(i / 2) - .5) * 2) * yw[slct]) for i in range(4)]
+                self.imRot = np.zeros_like(self.image.ravel(), dtype=float)
+                self.imRot[slct] = sum(imRot)
+                self.imRot[slct] = self.imRot[slct].reshape(self.image.shape)
+            elif self.nan_action == 'available':
+                assert False, "not implemented"
