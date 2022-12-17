@@ -10,10 +10,10 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
-from torchvision
-from engine import train_one_epoch, evaluate
-import utils
-import transforms as T
+#from torchvision
+#from engine import train_one_epoch, evaluate
+#import utils
+#import transforms as T
 
 
 class PennFudanDataset(object):
